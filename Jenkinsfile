@@ -15,8 +15,10 @@ pipeline {
     stages {
         stage('Clone repository') {
             steps {
+                // Dọn dẹp workspace trước khi clone
                 cleanWs()
                 checkout scm
+                
                 // Dọn dẹp file .tgz cũ (phòng hờ)
                 sh 'rm -f templates/*.tgz *.tgz'
             }
