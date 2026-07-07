@@ -4,7 +4,7 @@ pipeline {
     environment {
         CHART_NAME = 'prometheus'
         CHART_PATH = '.'
-        CHART_VERSION = '0.1.25'  // Tăng version lên
+        CHART_VERSION = '0.1.25'
         HARBOR_URL = '192.168.92.128:8088'
         HARBOR_PROJECT = 'helm-charts'
         HARBOR_USERNAME = 'admin'
@@ -15,12 +15,17 @@ pipeline {
     stages {
         stage('Clone repository') {
             steps {
-                // Dọn dẹp workspace trước khi clone
-                cleanWs()
                 checkout scm
-                
-                // Dọn dẹp file .tgz cũ (phòng hờ)
-                sh 'rm -f templates/*.tgz *.tgz'
+            }
+        }
+        
+        stage('Clean up old .tgz files') {
+            steps {
+                sh '''
+                    # Xóa SẠCH file .tgz TRƯỚC khi lint
+                    find . -name "*.tgz" -type f -delete
+                    echo "✅ Đã dọn dẹp file .tgz cũ"
+                '''
             }
         }
         
@@ -37,8 +42,7 @@ pipeline {
         stage('Package Helm Chart') {
             steps {
                 sh '''
-                    cd ${CHART_PATH}
-                    helm package . --version ${CHART_VERSION} --destination /tmp
+                    helm package ${CHART_PATH} --version ${CHART_VERSION} --destination /tmp
                     echo "✅ Helm chart đã đóng gói vào /tmp"
                 '''
             }
@@ -72,10 +76,9 @@ pipeline {
     
     post {
         always {
-            // Dọn dẹp file .tgz sau mỗi build
             sh '''
                 rm -f /tmp/${CHART_NAME}-*.tgz
-                echo "✅ Đã dọn dẹp file .tgz"
+                echo "✅ Đã dọn dẹp file .tgz trong /tmp"
             '''
         }
         success {
