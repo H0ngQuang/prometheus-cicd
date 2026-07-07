@@ -4,44 +4,26 @@ pipeline{
     }
 
     environment {
-        // Harbor Configuration
         HARBOR_URL = '192.168.92.128:8088'
         HARBOR_PROJECT = 'helm-charts'
-
-        // Prometheus    Configuration
         CHART_NAME = 'prometheus'
-        CHART_PATH = '.' // Root folder chua Chart.yaml
-
-        // Kubernetes
+        CHART_PATH = '.'
         K8S_NAMESPACE = 'monitoring'
-        // Credentials IDs
-        HARBOR_CRED_ID = 'harbor-credentials'
-
+        
+        // Thêm 2 biến này để login Harbor trực tiếp
+        HARBOR_USER = 'admin'
+        HARBOR_PASS = 'Harbor12345'
     }
 
-    parameters {
-        choice(
-            name: 'DEPLOY_ENV',
-            choices: ['dev', 'staging', 'prod'],
-            description: 'Chọn môi trường deploy'
-        )
-        booleanParam(
-            name: 'DRY_RUN',
-            defaultValue: false,
-            description: 'Chạy dry-run (không deploy thật)'
-        )
-    }
+    // ✅ ĐÃ BỎ: Block parameters (không còn DRY_RUN và DEPLOY_ENV)
 
     options {
-        // Tự động xóa builds cũ
         buildDiscarder(logRotator(
-            numToKeepStr: '10',           // Giữ 10 builds gần nhất
-            daysToKeepStr: '3',           // Giữ 3 ngày
-            artifactNumToKeepStr: '5',    // Giữ 5 artifacts
+            numToKeepStr: '10',
+            daysToKeepStr: '3',
+            artifactNumToKeepStr: '5',
             artifactDaysToKeepStr: '7'
         ))
-        
-        // Timeout pipeline sau 30 phút
         timeout(time: 30, unit: 'MINUTES')
     }
 
@@ -51,17 +33,14 @@ pipeline{
                 checkout scm
             }
         }
+        
         stage('2. Lint & Validate Helm Chart') {
             steps {
                 sh '''
-                    # Kiểm tra syntax Helm Chart
                     helm lint ${CHART_PATH}
-
-                    # Render chart thành YAML để kiểm tra
                     helm template ${CHART_NAME} ${CHART_PATH} \
                         --namespace ${K8S_NAMESPACE} \
                         > /tmp/helm-template.yaml
-
                     echo "✅ Helm chart hợp lệ."
                 '''
             }
@@ -71,49 +50,59 @@ pipeline{
             steps {
                 sh '''
                     mkdir -p ./chart-packages
-
-                    # Package chart với version từ BUILD_NUMBER
                     helm package ${CHART_PATH} \
                         --version 0.1.${BUILD_NUMBER} \
                         --destination ./chart-packages
-
                     echo "✅ Đã đóng gói chart:"
                     ls -lh ./chart-packages/
-                    '''
-            }
-        }
-        
-        stage('4. Push Chart len Harbor'){
-            steps {
-                sh '''
-                    helm registry login ${HARBOR_URL} \
-                        -u ${HARBOR_CRED_ID} \
-                        --password-stdin <<< $(kubectl get secret ${HARBOR_CRED_ID} -n dev -o jsonpath='{.data.password}' | base64 -d) \
-                        --plain-http
-                    
-                    CHART_FILE=$(ls -t ./chart-packages/*.tgz | head -1)
-                    echo "Push file: ${CHART_FILE}"
-                    
-                    helm push $(CHART_FILE) \
-                        oci://${HARBOR_URL}/${HARBOR_PROJECT} \
-                        --plain-http
-                    
-                    echo "✅ Da push Helm chart len Harbor!"
-                        
                 '''
             }
         }
+        
+        stage('4. Push Chart lên Harbor') {
+            steps {
+                sh '''
+                    # ✅ ĐÃ SỬA: Login Harbor bằng biến trực tiếp
+                    helm registry login ${HARBOR_URL} \
+                        -u ${HARBOR_USER} \
+                        -p ${HARBOR_PASS} \
+                        --plain-http
+                    
+                    CHART_FILE=$(ls -t ./chart-packages/*.tgz | head -1)
+                    echo "📦 Push file: ${CHART_FILE}"
+                    
+                    # ✅ ĐÃ SỬA: ${CHART_FILE} thay vì $(CHART_FILE)
+                    helm push "${CHART_FILE}" \
+                        oci://${HARBOR_URL}/${HARBOR_PROJECT} \
+                        --plain-http
+                    
+                    echo "✅ Đã push Helm chart lên Harbor!"
+                '''
+            }
+        }
+        
         stage('5. Deploy lên Kubernetes') {
             steps {
                 echo "🚀 Đang deploy Prometheus..."
                 sh '''
+                    # ✅ ĐÃ THÊM: Login Harbor để pull chart
+                    helm registry login ${HARBOR_URL} \
+                        -u ${HARBOR_USER} \
+                        -p ${HARBOR_PASS} \
+                        --plain-http
+                    
+                    # ✅ ĐÃ THÊM: --plain-http để pull từ Harbor HTTP
                     helm upgrade --install prometheus \
                         oci://${HARBOR_URL}/${HARBOR_PROJECT}/prometheus \
                         --version 0.1.${BUILD_NUMBER} \
                         --namespace ${K8S_NAMESPACE} \
+                        --plain-http \
                         --wait --timeout 5m
+                        
+                    echo "✅ Deploy thành công!"
                 '''
             }
         }
+        
     }
 }
