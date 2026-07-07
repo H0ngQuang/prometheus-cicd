@@ -1,7 +1,5 @@
 pipeline{
-    agent {
-        label 'helm-slave' 
-    }
+    agent any
 
     environment {
         HARBOR_URL = '192.168.92.128:8088'
