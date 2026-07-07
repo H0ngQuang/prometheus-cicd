@@ -48,26 +48,46 @@ pipeline {
             }
         }
         
-        stage('Push Chart lên Harbor') {
+        stage('4. Push Chart lên Harbor') {
             steps {
                 sh '''
-                    helm registry login ${HARBOR_URL} -u ${HARBOR_USERNAME} -p ${HARBOR_PASSWORD} --plain-http
-                    helm push /tmp/${CHART_NAME}-${CHART_VERSION}.tgz oci://${HARBOR_URL}/${HARBOR_PROJECT}
-                    echo "✅ Chart đã được đẩy lên Harbor."
+                    # ✅ ĐÃ SỬA: Login Harbor bằng biến trực tiếp
+                    helm registry login ${HARBOR_URL} \
+                        -u ${HARBOR_USER} \
+                        -p ${HARBOR_PASS} \
+                        --plain-http
+                    
+                    CHART_FILE=$(ls -t ./chart-packages/*.tgz | head -1)
+                    echo "📦 Push file: ${CHART_FILE}"
+                    
+                    # ✅ ĐÃ SỬA: ${CHART_FILE} thay vì $(CHART_FILE)
+                    helm push "${CHART_FILE}" \
+                        oci://${HARBOR_URL}/${HARBOR_PROJECT} \
+                        --plain-http
+                    
+                    echo "✅ Đã push Helm chart lên Harbor!"
                 '''
             }
         }
         
-        stage('Deploy lên Kubernetes') {
+        stage('5. Deploy lên Kubernetes') {
             steps {
+                echo "🚀 Đang deploy Prometheus..."
                 sh '''
-                    helm upgrade --install ${CHART_NAME} oci://${HARBOR_URL}/${HARBOR_PROJECT}/${CHART_NAME} \
-                        --version ${CHART_VERSION} \
+                    # ✅ ĐÃ THÊM: Login Harbor để pull chart
+                    helm registry login ${HARBOR_URL} \
+                        -u ${HARBOR_USER} \
+                        -p ${HARBOR_PASS} \
+                        --plain-http
+                    
+                    # ✅ ĐÃ THÊM: --plain-http để pull từ Harbor HTTP
+                    helm upgrade --install prometheus \
+                        oci://${HARBOR_URL}/${HARBOR_PROJECT}/prometheus \
+                        --version 0.1.${BUILD_NUMBER} \
                         --namespace ${K8S_NAMESPACE} \
                         --plain-http \
-                        --wait \
-                        --timeout 5m \
-                        --history-max 5
+                        --wait --timeout 5m
+                        
                     echo "✅ Deploy thành công!"
                 '''
             }
