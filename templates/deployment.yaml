@@ -28,7 +28,7 @@ spec:
       volumes:
         - name: config-volume
           configMap:
-            name: {{ .Release.Name }}-configMap
+            name: {{ .Release.Name }}-config
         - name: storage-volume
           {{- if .Values.persistence.enabled}}
           persistentVolumeClaim:
