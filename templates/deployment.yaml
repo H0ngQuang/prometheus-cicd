@@ -4,6 +4,7 @@ metadata:
   name: {{ .Release.Name}}-prometheus
 spec:
   replicas: {{ .Values.replicaCount}}
+  revisionHistoryLimit: 3 
   selector:
     matchLabels:
       app: prometheus
