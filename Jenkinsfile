@@ -1,106 +1,83 @@
-pipeline{
+pipeline {
     agent any
-
+    
     environment {
-        HARBOR_URL = '192.168.92.128:8088'
-        HARBOR_PROJECT = 'helm-charts'
         CHART_NAME = 'prometheus'
         CHART_PATH = '.'
+        CHART_VERSION = '0.1.25'  // Tăng version lên
+        HARBOR_URL = '192.168.92.128:8088'
+        HARBOR_PROJECT = 'helm-charts'
+        HARBOR_USERNAME = 'admin'
+        HARBOR_PASSWORD = 'Harbor12345'
         K8S_NAMESPACE = 'monitoring'
-        
-        // Thêm 2 biến này để login Harbor trực tiếp
-        HARBOR_USER = 'admin'
-        HARBOR_PASS = 'Harbor12345'
     }
-
-    // ✅ ĐÃ BỎ: Block parameters (không còn DRY_RUN và DEPLOY_ENV)
-
-    options {
-        buildDiscarder(logRotator(
-            numToKeepStr: '10',
-            daysToKeepStr: '3',
-            artifactNumToKeepStr: '5',
-            artifactDaysToKeepStr: '7'
-        ))
-        timeout(time: 30, unit: 'MINUTES')
-    }
-
+    
     stages {
-        stage('1. Clone repository') {
+        stage('Clone repository') {
             steps {
                 checkout scm
             }
         }
         
-        stage('2. Lint & Validate Helm Chart') {
+        stage('Lint & Validate Helm Chart') {
             steps {
                 sh '''
                     helm lint ${CHART_PATH}
-                    helm template ${CHART_NAME} ${CHART_PATH} \
-                        --namespace ${K8S_NAMESPACE} \
-                        > /tmp/helm-template.yaml
+                    helm template ${CHART_NAME} ${CHART_PATH} --namespace ${K8S_NAMESPACE} > /tmp/helm-template.yaml
                     echo "✅ Helm chart hợp lệ."
                 '''
             }
         }
         
-        stage('3. Package Helm Chart') {
+        stage('Package Helm Chart') {
             steps {
                 sh '''
-                    mkdir -p ./chart-packages
-                    helm package ${CHART_PATH} \
-                        --version 0.1.${BUILD_NUMBER} \
-                        --destination ./chart-packages
-                    echo "✅ Đã đóng gói chart:"
-                    ls -lh ./chart-packages/
+                    cd ${CHART_PATH}
+                    helm package . --version ${CHART_VERSION} --destination /tmp
+                    echo "✅ Helm chart đã đóng gói vào /tmp"
                 '''
             }
         }
         
-        stage('4. Push Chart lên Harbor') {
+        stage('Push Chart lên Harbor') {
             steps {
                 sh '''
-                    # ✅ ĐÃ SỬA: Login Harbor bằng biến trực tiếp
-                    helm registry login ${HARBOR_URL} \
-                        -u ${HARBOR_USER} \
-                        -p ${HARBOR_PASS} \
-                        --plain-http
-                    
-                    CHART_FILE=$(ls -t ./chart-packages/*.tgz | head -1)
-                    echo "📦 Push file: ${CHART_FILE}"
-                    
-                    # ✅ ĐÃ SỬA: ${CHART_FILE} thay vì $(CHART_FILE)
-                    helm push "${CHART_FILE}" \
-                        oci://${HARBOR_URL}/${HARBOR_PROJECT} \
-                        --plain-http
-                    
-                    echo "✅ Đã push Helm chart lên Harbor!"
+                    helm registry login ${HARBOR_URL} -u ${HARBOR_USERNAME} -p ${HARBOR_PASSWORD} --plain-http
+                    helm push /tmp/${CHART_NAME}-${CHART_VERSION}.tgz oci://${HARBOR_URL}/${HARBOR_PROJECT}
+                    echo "✅ Chart đã được đẩy lên Harbor."
                 '''
             }
         }
         
-        stage('5. Deploy lên Kubernetes') {
+        stage('Deploy lên Kubernetes') {
             steps {
-                echo "🚀 Đang deploy Prometheus..."
                 sh '''
-                    # ✅ ĐÃ THÊM: Login Harbor để pull chart
-                    helm registry login ${HARBOR_URL} \
-                        -u ${HARBOR_USER} \
-                        -p ${HARBOR_PASS} \
-                        --plain-http
-                    
-                    # ✅ ĐÃ THÊM: --plain-http để pull từ Harbor HTTP
-                    helm upgrade --install prometheus \
-                        oci://${HARBOR_URL}/${HARBOR_PROJECT}/prometheus \
-                        --version 0.1.${BUILD_NUMBER} \
+                    helm upgrade --install ${CHART_NAME} oci://${HARBOR_URL}/${HARBOR_PROJECT}/${CHART_NAME} \
+                        --version ${CHART_VERSION} \
                         --namespace ${K8S_NAMESPACE} \
                         --plain-http \
-                        --wait --timeout 5m
-                        
+                        --wait \
+                        --timeout 5m \
+                        --history-max 5
                     echo "✅ Deploy thành công!"
                 '''
             }
         }
-        
+    }
+    
+    post {
+        always {
+            // Dọn dẹp file .tgz sau mỗi build
+            sh '''
+                rm -f /tmp/${CHART_NAME}-*.tgz
+                echo "✅ Đã dọn dẹp file .tgz"
+            '''
+        }
+        success {
+            echo '✅ Pipeline thành công!'
+        }
+        failure {
+            echo '❌ Pipeline thất bại!'
+        }
     }
 }
