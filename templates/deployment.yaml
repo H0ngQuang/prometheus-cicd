@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: 
+  name: {{ .Release.Name}}-prometheus
+spec:
+  replicas: {{ .Values.replicaCount}}
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata: 
+      labels: 
+        app:  prometheus
+    spec:
+      containers:
+        - name: prometheus
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+
+          ports: 
+            - containerPort: 9090
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/prometheus
+            - name: storage-volume 
+              mountPath: /prometheus
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config-volume
+          configMap:
+            name: {{ .Release.Name }}-configMap
+        - name: storage-volume
+          {{- if .Values.persistence.enabled}}
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-pvc
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
